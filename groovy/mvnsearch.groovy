@@ -94,7 +94,7 @@ xmlParser.parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each
             def versions = {
                 return xmlParser.parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.'**'.TR.flatten().collect { tr ->
                     tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0)
-                }.findAll{ it }.sort(new VersionComparator()).reverse() // FIXME too complex for me
+                }.findAll{ it } // MEMO trust the order of versions in result page
             }.call()
 
             if (versions.size() > 0) {
@@ -103,26 +103,6 @@ xmlParser.parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each
             artifact.versions = versions
         }
         output(artifact)
-    }
-}
-
-class VersionComparator implements Comparator {
-    int compare(o1, o2) {
-        def list1 = o1.toString().split(/[.-]/)
-        def list2 = o2.toString().split(/[.-]/)
-        for (int i = 0; i < Math.max(list1.size(), list2.size()); i++) {
-            int result = (safeGetAt(list1, i) <=> safeGetAt(list2, i))
-            if (result != 0) return result
-        }
-        return 0
-    }
-
-    private int safeGetAt(list, index) {
-        if (list.size() - 1 < index) return 0
-        def value = list[index]
-        if (!value) return 0
-        if (value ==~ /[0-9]+/) return value as int
-        return value.hashCode() // FIXME Is there better way to sort 'rc', 'beta', 'alpha' and so on, correctly?
     }
 }
 
