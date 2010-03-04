@@ -17,6 +17,8 @@
 @Grab("net.sourceforge.nekohtml:nekohtml:1.9.14")
 import org.cyberneko.html.parsers.SAXParser
 
+import java.util.concurrent.*
+
 // ---------------------
 // Handle arguments
 // ---------------------
@@ -48,17 +50,52 @@ def keywords = opt.arguments()
 if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 
 // ---------------------
-// Prepare output closure (like cupsuled javascript function)
+// Retrieve
 // ---------------------
-def output = {
-    def printRichFormat = { artifact, mainPart ->
-        println "---<< ${artifact.name} >>".padRight(60, '-')
-        println mainPart
-        if (opt.v) println "versions: " + artifact.versions
-        if (opt.u) println artifact.url
-    }
+class Artifact {
+    def name, groupId, artifactId, versionsFuture
+    def getUrl() { "http://mvnrepository.com/artifact/${groupId}/${artifactId}" }
+    def getVersions() { versionsFuture?.get() }
+    def getLatestVersion() { (versions?.size() > 0) ? versions[0] : '?' }
+}
 
-    if (opt.p) return { artifact ->
+final THREADS = 5
+def pool = Executors.newFixedThreadPool(THREADS)
+
+def artifacts = []
+def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
+new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
+    def a = p.A[0]
+    (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
+        def artifact = new Artifact(
+            name: a.text(),
+            groupId: groupId,
+            artifactId: artifactId
+        )
+        if (opt.v) {
+            artifact.versionsFuture = pool.submit({
+                return new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
+                    '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.
+                    findAll{ it != null } // I trust the order of versions in result page
+            } as Callable)
+        }
+        artifacts << artifact
+    }
+}
+pool.shutdown() // it will terminate when all tasks are done
+
+// ---------------------
+// Output
+// ---------------------
+def printRichFormat = { artifact, mainPart ->
+    println "---<< ${artifact.name} >>".padRight(60, '-')
+    println mainPart
+    if (opt.v) println "versions: " + artifact.versions
+    if (opt.u) println artifact.url
+}
+
+artifacts.each { artifact ->
+    if (opt.p) {
         def writer = new StringWriter()
         new groovy.xml.MarkupBuilder(writer).dependency {
             groupId(artifact.groupId)
@@ -67,39 +104,12 @@ def output = {
         }
         printRichFormat artifact, writer
     }
-    if (opt.g) return { artifact ->
+    else if (opt.g) {
         def version = (opt.v) ? artifact.latestVersion : '*'
         printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
-    return { artifact ->
+    else {
         println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
-    }
-}.call()
-
-// ---------------------
-// Retrieve & Output (concurrently outputing on time)
-// ---------------------
-def xmlParser = new XmlParser(new SAXParser())
-def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
-xmlParser.parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
-    def a = p.A[0]
-    (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
-        def artifact = [
-            name: a.text(),
-            groupId: groupId,
-            artifactId: artifactId,
-            url: "http://mvnrepository.com/artifact/${groupId}/${artifactId}",
-        ]
-        if (opt.v) {
-            def versions = {
-                return xmlParser.parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.'**'.TR.flatten().collect { tr ->
-                    tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0)
-                }.findAll{ it != null } // I trust the order of versions in result page
-            }.call()
-            artifact.latestVersion = (versions.size() > 0) ? versions[0] : '?'
-            artifact.versions = versions
-        }
-        output(artifact)
     }
 }
 
