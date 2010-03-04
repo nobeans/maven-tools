@@ -53,9 +53,37 @@ if (opt.v && !(opt.g || opt.p)) cli.die '--with-version must be specfied with --
 def keywords = opt.arguments()
 if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 
-// -----------------------------------
-// Main (with concurrency)
-// -----------------------------------
+// ---------------------
+// Prepare printing
+// ---------------------
+def printArtifact = {
+    def printRichFormat = { artifact, mainPart ->
+        println "---<< ${artifact.name} >>".padRight(60, '-')
+        println mainPart
+        if (opt.v) println "versions: " + artifact.versions
+        if (opt.u) println artifact.url
+    }
+    if (opt.p) return { artifact ->
+        def writer = new StringWriter()
+        new groovy.xml.MarkupBuilder(writer).dependency {
+            groupId(artifact.groupId)
+            artifactId(artifact.artifactId)
+            if (opt.v) version(artifact.latestVersion)
+        }
+        printRichFormat artifact, writer
+    }
+    if (opt.g) return { artifact ->
+        def version = (opt.v) ? artifact.latestVersion : '*'
+        printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
+    }
+    return { artifact ->
+        println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
+    }
+}.call()
+
+// --------------------------------------
+// Retrieve and Print (with concurrency)
+// --------------------------------------
 class Artifact {
     def name, groupId, artifactId, versionsFuture
     def getUrl() { "http://mvnrepository.com/artifact/${groupId}/${artifactId}" }
@@ -65,9 +93,6 @@ class Artifact {
 
 final THREADS = 5
 Asynchronizer.doParallel(THREADS) {
-    // ---------------------
-    // Retrieve
-    // ---------------------
     def artifacts = []
     def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
     new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
@@ -83,38 +108,11 @@ Asynchronizer.doParallel(THREADS) {
                     return new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
                         '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.
                         findAll{ it != null } // I trust the order of versions in result page
-                }.async().call()
+                }.callAsync()
             }
             artifacts << artifact
         }
     }
-
-    // ---------------------
-    // Print
-    // ---------------------
-    def printRichFormat = { artifact, mainPart ->
-        println "---<< ${artifact.name} >>".padRight(60, '-')
-        println mainPart
-        if (opt.v) println "versions: " + artifact.versions
-        if (opt.u) println artifact.url
-    }
-    artifacts.each { artifact ->
-        if (opt.p) {
-            def writer = new StringWriter()
-            new groovy.xml.MarkupBuilder(writer).dependency {
-                groupId(artifact.groupId)
-                artifactId(artifact.artifactId)
-                if (opt.v) version(artifact.latestVersion)
-            }
-            printRichFormat artifact, writer
-        }
-        else if (opt.g) {
-            def version = (opt.v) ? artifact.latestVersion : '*'
-            printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
-        }
-        else {
-            println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
-        }
-    }
+    artifacts.each { printArtifact it }
 }
 
