@@ -20,7 +20,6 @@ import org.cyberneko.html.parsers.SAXParser
 @GrabResolver(name="jboss", root="http://repository.jboss.org/maven2/")
 @Grab("org.codehaus.gpars:gpars:0.9")
 import groovyx.gpars.Asynchronizer
-import static groovyx.gpars.actor.Actors.*
 
 // -----------------------------------
 // Handle arguments
@@ -85,12 +84,6 @@ def printArtifact = {
     }
 }.call()
 
-def console = actor {
-    loop {
-        react { printArtifact it }
-    }
-}
-
 // --------------------------------------
 // Retrieve and Print (with concurrency)
 // --------------------------------------
@@ -103,19 +96,25 @@ def versionRetriever = { groupId, artifactId ->
     return []
 }
 
+def artifactFutures = []
+
 final THREADS = 5
 Asynchronizer.doParallel(THREADS) {
     def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
-    new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().eachParallel { p -> // for each found artifact
+    new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
         def a = p.A[0]
         (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
-            console.send([
-                name: a.text(),
-                groupId: groupId,
-                artifactId: artifactId,
-                versions: versionRetriever(groupId, artifactId)
-            ])
+            artifactFutures << {
+                return [
+                    name: a.text(),
+                    groupId: groupId,
+                    artifactId: artifactId,
+                    versions: versionRetriever(groupId, artifactId)
+                ]
+            }.callAsync()
         }
     }
 }
+
+artifactFutures.each { future -> printArtifact future.get() }
 
