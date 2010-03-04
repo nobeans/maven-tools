@@ -61,17 +61,22 @@ def printArtifact = {
         if (opt.v) println "versions: " + artifact.versions
         if (opt.u) println artifact.url
     }
+    def latestVersion = { artifact ->
+        // I trust the order of versions in result page
+        return (artifact.versions?.size() > 0) ? artifact.versions[0] : '?'
+    }
+
     if (opt.p) return { artifact ->
         def writer = new StringWriter()
         new groovy.xml.MarkupBuilder(writer).dependency {
             groupId(artifact.groupId)
             artifactId(artifact.artifactId)
-            if (opt.v) version(artifact.latestVersion)
+            if (opt.v) version(latestVersion(artifact))
         }
         printRichFormat artifact, writer
     }
     if (opt.g) return { artifact ->
-        def version = (opt.v) ? artifact.latestVersion : '*'
+        def version = (opt.v) ? latestVersion(artifact) : '*'
         printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
@@ -82,30 +87,34 @@ def printArtifact = {
 // --------------------------------------
 // Retrieve and Print (with concurrency)
 // --------------------------------------
+def versionRetriever = { groupId, artifactId ->
+    if (opt.v) {
+        def artifactUrl = "http://mvnrepository.com/artifact/${groupId}/${artifactId}"
+        return new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
+            '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+    }
+    return []
+}
+
+def artifactFutures = []
+
 final THREADS = 5
 Asynchronizer.doParallel(THREADS) {
-    def artifactFutures = []
     def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
     new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
         def a = p.A[0]
         (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
             artifactFutures << {
-                def artifact = [
+                return [
                     name: a.text(),
                     groupId: groupId,
                     artifactId: artifactId,
+                    versions: versionRetriever(groupId, artifactId)
                 ]
-                if (opt.v) {
-                    // Iltrust the order of versions in result page
-                    def artifactUrl = "http://mvnrepository.com/artifact/${artifact.groupId}/${artifact.artifactId}"
-                    artifact.versions = new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
-                        '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
-                    artifact.latestVersion = (artifact.versions?.size() > 0) ? artifact.versions[0] : '?'
-                }
-                return artifact
             }.callAsync()
         }
     }
-    artifactFutures.each { future -> printArtifact future.get() }
 }
+
+artifactFutures.each { future -> printArtifact future.get() }
 
