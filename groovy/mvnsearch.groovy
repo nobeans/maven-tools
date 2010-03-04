@@ -21,8 +21,6 @@ import org.cyberneko.html.parsers.SAXParser
 @Grab("org.codehaus.gpars:gpars:0.9")
 import groovyx.gpars.Asynchronizer
 
-import java.util.concurrent.*
-
 // -----------------------------------
 // Handle arguments
 // -----------------------------------
@@ -84,35 +82,30 @@ def printArtifact = {
 // --------------------------------------
 // Retrieve and Print (with concurrency)
 // --------------------------------------
-class Artifact {
-    def name, groupId, artifactId, versionsFuture
-    def getUrl() { "http://mvnrepository.com/artifact/${groupId}/${artifactId}" }
-    def getVersions() { versionsFuture?.get() }
-    def getLatestVersion() { (versions?.size() > 0) ? versions[0] : '?' }
-}
-
 final THREADS = 5
 Asynchronizer.doParallel(THREADS) {
-    def artifacts = []
+    def artifactFutures = []
     def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
     new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
         def a = p.A[0]
         (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
-            def artifact = new Artifact(
-                name: a.text(),
-                groupId: groupId,
-                artifactId: artifactId
-            )
-            if (opt.v) {
-                artifact.versionsFuture = {
-                    return new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
-                        '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.
-                        findAll{ it != null } // I trust the order of versions in result page
-                }.callAsync()
-            }
-            artifacts << artifact
+            artifactFutures << {
+                def artifact = [
+                    name: a.text(),
+                    groupId: groupId,
+                    artifactId: artifactId,
+                ]
+                if (opt.v) {
+                    // Iltrust the order of versions in result page
+                    def artifactUrl = "http://mvnrepository.com/artifact/${artifact.groupId}/${artifact.artifactId}"
+                    artifact.versions = new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
+                        '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+                    artifact.latestVersion = (artifact.versions?.size() > 0) ? artifact.versions[0] : '?'
+                }
+                return artifact
+            }.callAsync()
         }
     }
-    artifacts.each { printArtifact it }
+    artifactFutures.each { future -> printArtifact future.get() }
 }
 
