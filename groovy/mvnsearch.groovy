@@ -55,7 +55,7 @@ def output = {
         println "---<< ${artifact.name} >>".padRight(60, '-')
         println mainPart
         if (opt.v) println "versions: " + artifact.versions
-        if (opt.u) println "url: " + artifact.url
+        if (opt.u) println artifact.url
     }
 
     if (opt.p) return { artifact ->
@@ -63,12 +63,12 @@ def output = {
         new groovy.xml.MarkupBuilder(writer).dependency {
             groupId(artifact.groupId)
             artifactId(artifact.artifactId)
-            if (opt.v && artifact.latestVersion) version(artifact.latestVersion)
+            if (opt.v) version(artifact.latestVersion)
         }
         printRichFormat artifact, writer
     }
     if (opt.g) return { artifact ->
-        def version = (opt.v && artifact.latestVersion) ? artifact.latestVersion : '*'
+        def version = (opt.v) ? artifact.latestVersion : '*'
         printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
@@ -94,12 +94,9 @@ xmlParser.parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each
             def versions = {
                 return xmlParser.parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.'**'.TR.flatten().collect { tr ->
                     tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0)
-                }.findAll{ it } // MEMO trust the order of versions in result page
+                }.findAll{ it != null } // I trust the order of versions in result page
             }.call()
-
-            if (versions.size() > 0) {
-                artifact.latestVersion = versions[0]
-            }
+            artifact.latestVersion = (versions.size() > 0) ? versions[0] : '?'
             artifact.versions = versions
         }
         output(artifact)
