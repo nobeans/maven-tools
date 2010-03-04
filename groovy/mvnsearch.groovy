@@ -24,10 +24,11 @@ def command = System.properties.thisCommand ?: 'groovy mvnsearch.groovy'
 def cli = new CliBuilder(usage:"$command [OPTIONS] KEYWORD..[KEYWORD]")
 cli.formatter.width = 80
 cli.with {
-    h longOpt:'help', 'usage information'
-    g longOpt:'format-grape', 'groovy grape format'
-    p longOpt:'format-pom', 'maven2 pom format'
-    v longOpt:'retrieve-version','retrieving versions (HEAVY)'
+    h longOpt:'help', 'print this help message'
+    g longOpt:'format-grape', 'print Groovy Grape format'
+    p longOpt:'format-pom', 'print Maven2 pom format'
+    v longOpt:'with-version','with retrieved versions (HEAVY)'
+    u longOpt:'with-url', 'with URL of the artifact in mvnsearch.com'
 }
 cli.metaClass.die = { message ->
     cli.writer.println 'ERROR: ' + message
@@ -42,7 +43,7 @@ if (opt.h) {
     return
 }
 if (opt.g && opt.p) cli.die 'options --format-xxxxx cannot be specified at the same time'
-if (opt.v && !(opt.g || opt.p)) cli.die '--retrieve-version must be specfied with --format-xxxxx'
+if (opt.v && !(opt.g || opt.p)) cli.die '--with-version must be specfied with --format-xxxxx'
 def keywords = opt.arguments()
 if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 
@@ -53,9 +54,8 @@ def output = {
     def printRichFormat = { artifact, mainPart ->
         println "---<< ${artifact.name} >>".padRight(60, '-')
         println mainPart
-        if (opt.v) {
-            println "versions: " + artifact.versions
-        }
+        if (opt.v) println "versions: " + artifact.versions
+        if (opt.u) println "url: " + artifact.url
     }
 
     if (opt.p) return { artifact ->
@@ -72,7 +72,7 @@ def output = {
         printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
-        println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}"
+        println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
     }
 }.call()
 
@@ -88,11 +88,11 @@ xmlParser.parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each
             name: a.text(),
             groupId: groupId,
             artifactId: artifactId,
+            url: "http://mvnrepository.com/artifact/${groupId}/${artifactId}",
         ]
         if (opt.v) {
             def versions = {
-                def artifactUrl = "http://mvnrepository.com/artifact/${artifact.groupId}/${artifact.artifactId}"
-                return xmlParser.parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.'**'.TR.flatten().collect { tr ->
+                return xmlParser.parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.'**'.TR.flatten().collect { tr ->
                     tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0)
                 }.findAll{ it }.sort(new VersionComparator()).reverse() // FIXME too complex for me
             }.call()
