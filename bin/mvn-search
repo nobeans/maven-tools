@@ -19,7 +19,7 @@
 # RECOMMEND: rewrite absolute full path in your environment
 MY_ROOT_DIR=`cd \`dirname $0\`/.. && pwd`
 
-JAVA_OPTS="-DthisCommand=`basename $0` $JAVA_OPTS"
+JAVA_OPTS="-J-DthisCommand=`basename $0` $JAVA_OPTS"
 
 groovy $MY_ROOT_DIR/groovy/mvnsearch.groovy $*
 
