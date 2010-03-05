@@ -19,7 +19,10 @@ import org.cyberneko.html.parsers.SAXParser
 
 @GrabResolver(name="jboss", root="http://repository.jboss.org/maven2/")
 @Grab("org.codehaus.gpars:gpars:0.9")
-import groovyx.gpars.Asynchronizer
+import groovyx.gpars.*
+import static groovyx.gpars.actor.Actors.*
+
+import java.util.concurrent.*
 
 // -----------------------------------
 // Handle arguments
@@ -87,7 +90,7 @@ def printArtifact = {
 // --------------------------------------
 // Retrieve and Print (with concurrency)
 // --------------------------------------
-def versionRetriever = { groupId, artifactId ->
+def retrieveVersions = { groupId, artifactId ->
     if (opt.v) {
         def artifactUrl = "http://mvnrepository.com/artifact/${groupId}/${artifactId}"
         return new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
@@ -95,26 +98,33 @@ def versionRetriever = { groupId, artifactId ->
     }
     return []
 }
-
-def artifactFutures = []
-
-final THREADS = 5
-Asynchronizer.doParallel(THREADS) {
-    def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
-    new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
+def retrieveArtifacts = { query ->
+    def queryUrl = "http://mvnrepository.com/search.html?query=" + query
+    return new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().collect { p -> // for each found artifact
         def a = p.A[0]
-        (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').each { all, groupId, artifactId -> // only 1 loop
-            artifactFutures << {
-                return [
-                    name: a.text(),
-                    groupId: groupId,
-                    artifactId: artifactId,
-                    versions: versionRetriever(groupId, artifactId)
-                ]
-            }.callAsync()
-        }
+        (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').collect { all, groupId, artifactId -> // only 1 loop
+            [name:a.text(), groupId:groupId, artifactId:artifactId]
+        }.flatten()
     }
 }
 
-artifactFutures.each { future -> printArtifact future.get() }
+def artifactFutures = new ArrayBlockingQueue(8)
+
+actor {
+    loop {
+        printArtifact artifactFutures.take().get()
+    }
+}
+
+Asynchronizer.doParallel(9) { pool ->
+    retrieveArtifacts(keywords.join('+')).each { artifact ->
+        artifactFutures << {
+        //    artifact.versions = retrieveVersions(artifact.groupId, artifact.artifactId)
+            return artifact
+        }.callAsync()
+    }
+
+    pool.shutdown()
+    pool.awaitTermination(5, TimeUnit.MINUTES)
+}
 
