@@ -59,7 +59,8 @@ if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 // ---------------------
 def printArtifact = {
     def printRichFormat = { artifact, mainPart ->
-        println "---<< ${artifact.name} >>".padRight(60, '-')
+        println "-"*60
+        println ">> ${artifact.name}"
         println mainPart
         if (opt.v) println "versions: " + artifact.versions
         if (opt.u) println artifact.url
