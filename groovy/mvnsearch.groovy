@@ -88,43 +88,40 @@ def printArtifact = {
 }.call()
 
 // --------------------------------------
-// Retrieve and Print (with concurrency)
+// Prepare retrieving
 // --------------------------------------
-def retrieveVersions = { groupId, artifactId ->
+def retrieveArtifacts = {
+    def artifacts = []
+    def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
+    new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
+        def a = p.A[0]
+        def (all, groupId, artifactId) = (a.@href =~ '^/artifact/([^/]+)/([^/]+)$')[0]
+        artifacts << [name:a.text(), groupId:groupId, artifactId:artifactId]
+    }
+    return artifacts
+}
+def resolveVersions = { artifact ->
     if (opt.v) {
-        def artifactUrl = "http://mvnrepository.com/artifact/${groupId}/${artifactId}"
-        return new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
+        def artifactUrl = "http://mvnrepository.com/artifact/${artifact.groupId}/${artifact.artifactId}"
+        artifact.versions = new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
             '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
     }
-    return []
-}
-def retrieveArtifacts = { query ->
-    def queryUrl = "http://mvnrepository.com/search.html?query=" + query
-    return new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().collect { p -> // for each found artifact
-        def a = p.A[0]
-        (a.@href =~ '^/artifact/([^/]+)/([^/]+)$').collect { all, groupId, artifactId -> // only 1 loop
-            [name:a.text(), groupId:groupId, artifactId:artifactId]
-        }.flatten()
-    }
+    return artifact
 }
 
-def artifactFutures = new ArrayBlockingQueue(8)
-
+// --------------------------------------
+// Main (with concurrency)
+// --------------------------------------
+def queue = new LinkedBlockingQueue()
+def artifacts = retrieveArtifacts()
 actor {
-    loop {
-        printArtifact artifactFutures.take().get()
+    Asynchronizer.doParallel(5) {
+        artifacts.each { artifact ->
+            queue << { resolveVersions(artifact) }.callAsync()
+        }
     }
 }
-
-Asynchronizer.doParallel(9) { pool ->
-    retrieveArtifacts(keywords.join('+')).each { artifact ->
-        artifactFutures << {
-        //    artifact.versions = retrieveVersions(artifact.groupId, artifact.artifactId)
-            return artifact
-        }.callAsync()
-    }
-
-    pool.shutdown()
-    pool.awaitTermination(5, TimeUnit.MINUTES)
+artifacts.size().times {
+    printArtifact queue.take().get()
 }
 
