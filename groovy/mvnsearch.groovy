@@ -19,15 +19,15 @@ import org.cyberneko.html.parsers.SAXParser
 
 @GrabResolver(name="jboss", root="http://repository.jboss.org/maven2/")
 @Grab("org.codehaus.gpars:gpars:0.9")
-import groovyx.gpars.*
+import groovyx.gpars.Asynchronizer
 import static groovyx.gpars.actor.Actors.*
 
-import java.util.concurrent.*
+import java.util.concurrent.LinkedBlockingQueue
 
 // -----------------------------------
 // Handle arguments
 // -----------------------------------
-def command = System.properties.thisCommand ?: 'groovy mvnsearch.groovy'
+def command = System.properties.thisCommand ?: 'groovy mvnsearch.groovy' // for wrapper script
 def cli = new CliBuilder(usage:"$command [OPTIONS] KEYWORD..[KEYWORD]")
 cli.formatter.width = 80
 cli.with {
@@ -55,7 +55,7 @@ def keywords = opt.arguments()
 if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 
 // ---------------------
-// Prepare printing
+// Prepare closures
 // ---------------------
 def printArtifact = {
     def printRichFormat = { artifact, mainPart ->
@@ -65,22 +65,18 @@ def printArtifact = {
         if (opt.v) println "versions: " + artifact.versions
         if (opt.u) println artifact.url
     }
-    def latestVersion = { artifact ->
-        // I trust the order of versions in result page
-        return (artifact.versions?.size() > 0) ? artifact.versions[0] : '?'
-    }
 
     if (opt.p) return { artifact ->
         def writer = new StringWriter()
         new groovy.xml.MarkupBuilder(writer).dependency {
             groupId(artifact.groupId)
             artifactId(artifact.artifactId)
-            if (opt.v) version(latestVersion(artifact))
+            if (opt.v) version(artifact.latestVersion)
         }
         printRichFormat artifact, writer
     }
     if (opt.g) return { artifact ->
-        def version = (opt.v) ? latestVersion(artifact) : '*'
+        def version = (opt.v) ? artifact.latestVersion : '*'
         printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
@@ -88,24 +84,30 @@ def printArtifact = {
     }
 }.call()
 
-// --------------------------------------
-// Prepare retrieving
-// --------------------------------------
 def retrieveArtifacts = {
     def artifacts = []
     def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
     new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
         def a = p.A[0]
         def (all, groupId, artifactId) = (a.@href =~ '^/artifact/([^/]+)/([^/]+)$')[0]
-        artifacts << [name:a.text(), groupId:groupId, artifactId:artifactId]
+        artifacts << [
+            name: a.text(),
+            groupId: groupId,
+            artifactId: artifactId,
+            url: "http://mvnrepository.com/artifact/${groupId}/${artifactId}",
+        ]
     }
     return artifacts
 }
+
 def resolveVersions = { artifact ->
     if (opt.v) {
-        def artifactUrl = "http://mvnrepository.com/artifact/${artifact.groupId}/${artifact.artifactId}"
-        artifact.versions = new XmlParser(new SAXParser()).parse(artifactUrl).'**'.TABLE.findAll{ it.@class == 'grid' }.
+        // retrieving all versions
+        artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
             '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+
+        // pick up latest version. I trust the order of versions in result page.
+        artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
     }
     return artifact
 }
@@ -116,7 +118,7 @@ def resolveVersions = { artifact ->
 def queue = new LinkedBlockingQueue()
 def artifacts = retrieveArtifacts()
 actor {
-    Asynchronizer.doParallel(5) {
+    Asynchronizer.doParallel(5) { // multiplicity (number of thread)
         artifacts.each { artifact ->
             queue << { resolveVersions(artifact) }.callAsync()
         }
