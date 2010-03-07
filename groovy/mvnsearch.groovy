@@ -50,7 +50,6 @@ if (opt.h) {
     return
 }
 if (opt.g && opt.p) cli.die 'options --format-xxxxx cannot be specified at the same time'
-if (opt.v && !(opt.g || opt.p)) cli.die '--with-version must be specfied with --format-xxxxx'
 def keywords = opt.arguments()
 if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 
@@ -58,10 +57,12 @@ if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 // Prepare closures
 // ---------------------
 def printArtifact = {
-    def printRichFormat = { artifact, mainPart ->
-        println "-"*60
-        println ">> ${artifact.name}"
-        println mainPart
+    def doPrint = { artifact, mainPart=null ->
+        if (opt.p || opt.g || opt.v || opt.u) {
+            println "-"*60
+            println ">> ${artifact.name}"
+        }
+        if (mainPart) println mainPart
         if (opt.v) println "versions: " + artifact.versions
         if (opt.u) println artifact.url
     }
@@ -73,14 +74,14 @@ def printArtifact = {
             artifactId(artifact.artifactId)
             if (opt.v) version(artifact.latestVersion)
         }
-        printRichFormat artifact, writer
+        doPrint artifact, writer
     }
     if (opt.g) return { artifact ->
         def version = (opt.v) ? artifact.latestVersion : '*'
-        printRichFormat artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
+        doPrint artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
-        println "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
+        doPrint artifact, "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
     }
 }.call()
 
