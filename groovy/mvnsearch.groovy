@@ -100,14 +100,21 @@ def retrieveArtifacts = {
     return artifacts
 }
 
-def resolveVersions = { artifact ->
+final MAX_RETRIEVABLE_VERSIONS = 10
+def resolveVersions = { artifact, index ->
     if (opt.v) {
-        // retrieving all versions
-        artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
-            '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+        // to prevent unexpected DoS attack
+        if (index >= MAX_RETRIEVABLE_VERSIONS) {
+            artifact.versions = 'WARN: exceeded upper limt to resolve versions'
+            artifact.latestVersion = '*'
+        } else {
+            // retrieving all versions
+            artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
+                '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
 
-        // pick up latest version. I trust the order of versions in result page.
-        artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
+            // pick up latest version. I trust the order of versions in result page.
+            artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
+        }
     }
     return artifact
 }
@@ -119,8 +126,8 @@ def queue = new LinkedBlockingQueue()
 def artifacts = retrieveArtifacts()
 actor {
     Asynchronizer.doParallel(5) { // multiplicity (number of thread)
-        artifacts.each { artifact ->
-            queue << { resolveVersions(artifact) }.callAsync()
+        artifacts.eachWithIndex { artifact, index ->
+            queue << { resolveVersions(artifact, index) }.callAsync()
         }
     }
 }
