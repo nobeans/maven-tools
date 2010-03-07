@@ -124,8 +124,9 @@ def resolveVersions = { artifact, index ->
 // --------------------------------------
 def queue = new LinkedBlockingQueue()
 def artifacts = retrieveArtifacts()
+final PARALLEL_THREAD_COUNT = 5
 actor {
-    Asynchronizer.doParallel(5) { // multiplicity (number of thread)
+    Asynchronizer.doParallel(PARALLEL_THREAD_COUNT) { // multiplicity (number of thread)
         artifacts.eachWithIndex { artifact, index ->
             queue << { resolveVersions(artifact, index) }.callAsync()
         }
