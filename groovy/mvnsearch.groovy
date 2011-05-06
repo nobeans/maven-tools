@@ -18,8 +18,8 @@
 import org.cyberneko.html.parsers.SAXParser
 
 @GrabResolver(name="jboss", root="http://repository.jboss.org/maven2/")
-@Grab("org.codehaus.gpars:gpars:0.9")
-import groovyx.gpars.Asynchronizer
+@Grab("org.codehaus.gpars:gpars:0.11")
+import groovyx.gpars.GParsPool
 import static groovyx.gpars.actor.Actors.*
 
 import java.util.concurrent.LinkedBlockingQueue
@@ -127,7 +127,7 @@ def queue = new LinkedBlockingQueue()
 def artifacts = retrieveArtifacts()
 final PARALLEL_THREAD_COUNT = 5
 actor {
-    Asynchronizer.doParallel(PARALLEL_THREAD_COUNT) { // multiplicity (number of thread)
+    GParsPool.withPool(PARALLEL_THREAD_COUNT) { executor -> // multiplicity (number of thread)
         artifacts.eachWithIndex { artifact, index ->
             queue << { resolveVersions(artifact, index) }.callAsync()
         }
