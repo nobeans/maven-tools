@@ -21,5 +21,9 @@ MY_ROOT_DIR=`cd \`dirname $0\`/.. && pwd`
 
 JAVA_OPTS="-DthisCommand=`basename $0` $JAVA_OPTS"
 
-groovy $MY_ROOT_DIR/groovy/mvnsearch.groovy $*
+GROOVY_CMD=groovy
+if [ "$1" = "--groovyserv" ] || [ "$1" = "-gs" ]; then
+    GROOVY_CMD=groovyclient
+fi
 
+$GROOVY_CMD $MY_ROOT_DIR/groovy/mvnsearch.groovy $*
