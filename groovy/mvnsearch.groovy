@@ -94,44 +94,38 @@ def retrieveArtifacts = {
             groupId: groupId,
             artifactId: artifactId,
             url: "http://mvnrepository.com/artifact/${groupId}/${artifactId}",
+            versions: 'WARN: exceeded upper limt to resolve versions',
+            latestVersion: '*',
         ]
     }
     return artifacts
 }
 
-final MAX_RETRIEVABLE_VERSIONS = 10
-def resolveVersions = { artifact, index ->
-    if (opt.v) {
-        // to prevent unexpected DoS attack
-        if (index >= MAX_RETRIEVABLE_VERSIONS) {
-            artifact.versions = 'WARN: exceeded upper limt to resolve versions'
-            artifact.latestVersion = '*'
-        } else {
-            // retrieving all versions
-            artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
-                '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+def resolveVersions = { artifact ->
+    // retrieving all versions
+    artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
+        '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
 
-            // pick up latest version. I trust the order of versions in result page.
-            artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
-        }
-    }
+    // pick up latest version. I trust the order of versions in result page.
+    artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
     return artifact
 }
 
-// --------------------------------------
-// Main (with concurrency)
-// --------------------------------------
-def queue = new LinkedBlockingQueue()
-def artifacts = retrieveArtifacts()
-final PARALLEL_THREAD_COUNT = 5
-actor { // just requesting asynchronously
-    GParsPool.withPool(PARALLEL_THREAD_COUNT) { // multiplicity (number of thread)
-        artifacts.eachWithIndex { artifact, index ->
-            queue << { resolveVersions(artifact, index) }.callAsync()
+def resolveAllVersions = { artifacts ->
+    if (opt.v) {
+        final PARALLEL_THREAD_COUNT = 5     // multiplicity (a number of thread)
+        final MAX_RETRIEVABLE_VERSIONS = 10 // to prevent unexpected DoS attack
+        GParsPool.withPool(PARALLEL_THREAD_COUNT) {
+            artifacts[0..<([MAX_RETRIEVABLE_VERSIONS, artifacts.size()].min())].eachParallel { artifact ->
+                resolveVersions(artifact)
+            }
         }
     }
+    return artifacts
 }
-artifacts.size().times {
-    printArtifact queue.take().get()
-}
+
+// --------------------------------------
+// Main
+// --------------------------------------
+resolveAllVersions(retrieveArtifacts()).each{ printArtifact it }
 
