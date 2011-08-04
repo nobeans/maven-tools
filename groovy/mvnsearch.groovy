@@ -98,7 +98,7 @@ def retrieveArtifacts = {
             latestVersion: '*',
         ]
     }
-    return artifacts
+    return artifacts.sort{ it.name }
 }
 
 def resolveVersions = { artifact ->
