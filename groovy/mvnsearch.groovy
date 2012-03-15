@@ -55,8 +55,11 @@ if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 // Prepare closures
 // ---------------------
 def printArtifact = {
+    def isOneline = { option ->
+        return !(option.p || option.g || option.v || option.u)
+    }
     def doPrint = { artifact, mainPart=null ->
-        if (opt.p || opt.g || opt.v || opt.u) {
+        if (!isOneline(opt)) {
             println "-"*60
             println ">> ${artifact.name}"
         }
@@ -79,7 +82,7 @@ def printArtifact = {
         doPrint artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
     }
     return { artifact ->
-        doPrint artifact, "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}" + ((opt.u) ? " - ${artifact.url}" : "")
+        doPrint artifact, "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}"
     }
 }.call()
 
