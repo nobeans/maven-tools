@@ -30,7 +30,7 @@ def cli = new CliBuilder(usage:"$command [OPTIONS] KEYWORD..[KEYWORD]")
 cli.formatter.width = 80
 cli.with {
     h longOpt:'help', 'print this help message'
-    g longOpt:'format-grape', 'print Groovy Grape format'
+    g longOpt:'format-gr8', 'print Groovy Grape/Gradle/Grails format'
     p longOpt:'format-pom', 'print Maven2 pom format'
     v longOpt:'with-version','with retrieved versions (HEAVY)'
     u longOpt:'with-url', 'with URL of the artifact in mvnsearch.com'
@@ -79,7 +79,7 @@ def printArtifact = {
     }
     if (opt.g) return { artifact ->
         def version = (opt.v) ? artifact.latestVersion : '*'
-        doPrint artifact, """@Grab("${artifact.groupId}:${artifact.artifactId}:${version}")"""
+        doPrint artifact, /"${artifact.groupId}:${artifact.artifactId}:${version}"/
     }
     return { artifact ->
         doPrint artifact, "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}"
