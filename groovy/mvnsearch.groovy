@@ -33,7 +33,6 @@ cli.with {
     g longOpt:'format-gr8', 'print Groovy Grape/Gradle/Grails format'
     p longOpt:'format-pom', 'print Maven2 pom format'
     v longOpt:'with-version','with retrieved versions (HEAVY)'
-    u longOpt:'with-url', 'with URL of the artifact in mvnsearch.com'
 }
 cli.metaClass.die = { message ->
     cli.writer.println 'ERROR: ' + message
@@ -54,37 +53,34 @@ if (keywords.size() < 1) cli.die 'KEYWORD must be specified'
 // ---------------------
 // Prepare closures
 // ---------------------
-def printArtifact = {
-    def isOneline = { option ->
-        return !(option.p || option.g || option.v || option.u)
-    }
-    def doPrint = { artifact, mainPart=null ->
-        if (!isOneline(opt)) {
-            println "-"*60
-            println ">> ${artifact.name}"
-        }
-        if (mainPart) println mainPart
-        if (opt.v) println "versions: " + artifact.versions
-        if (opt.u) println artifact.url
-    }
+def printArtifact = { artifact ->
+    if (opt.p) {
+        println "-" * 60
+        println ">> ${artifact.name} -- ${artifact.url}"
 
-    if (opt.p) return { artifact ->
         def writer = new StringWriter()
         new groovy.xml.MarkupBuilder(writer).dependency {
             groupId(artifact.groupId)
             artifactId(artifact.artifactId)
             if (opt.v) version(artifact.latestVersion)
         }
-        doPrint artifact, writer
+        println writer.toString()
+
+        if (opt.v) println "versions: " + artifact.versions.join(", ")
+        return
     }
-    if (opt.g) return { artifact ->
+    if (opt.g) {
+        println "-" * 60
+        println ">> ${artifact.name} -- ${artifact.url}"
+
         def version = (opt.v) ? artifact.latestVersion : '*'
-        doPrint artifact, /"${artifact.groupId}:${artifact.artifactId}:${version}"/
+        println "\"${artifact.groupId}:${artifact.artifactId}:${version}\""
+
+        if (opt.v) println "versions: " + artifact.versions.join(", ")
+        return
     }
-    return { artifact ->
-        doPrint artifact, "${artifact.name} - ${artifact.groupId}:${artifact.artifactId}"
-    }
-}.call()
+    println "${artifact.name} -- ${artifact.groupId}:${artifact.artifactId} -- ${artifact.url}"
+}
 
 def retrieveArtifacts = {
     def artifacts = []
@@ -96,7 +92,7 @@ def retrieveArtifacts = {
             groupId: groupId,
             artifactId: artifactId,
             url: new URL("http://mvnrepository.com/artifact/${groupId}/${artifactId}"),
-            versions: 'WARN: exceeded upper limt to resolve versions',
+            versions: ['WARN: exceeded upper limt to resolve versions'],
             latestVersion: '*',
         ]
     }
@@ -105,7 +101,7 @@ def retrieveArtifacts = {
 
 def resolveVersions = { artifact ->
     // retrieving all versions
-    artifact.versions = source.getAllElements('class', ~/versionbutton release/).collect { it.content }
+    artifact.versions = new Source(artifact.url).getAllElements('class', ~/versionbutton release/).collect { it.content }
 
     // pick up latest version. I trust the order of versions in result page.
     artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
@@ -128,5 +124,6 @@ def resolveAllVersions = { artifacts ->
 // --------------------------------------
 // Main
 // --------------------------------------
+
 resolveAllVersions(retrieveArtifacts()).each { printArtifact it }
 
