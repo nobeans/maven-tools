@@ -19,6 +19,8 @@ import net.htmlparser.jericho.Source
 
 import groovyx.gpars.GParsPool
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.logging.Logger
+import java.util.logging.Level
 
 import static groovyx.gpars.actor.Actors.*
 
@@ -124,6 +126,9 @@ def resolveAllVersions = { artifacts ->
 // --------------------------------------
 // Main
 // --------------------------------------
+
+// suppress a SEVERE log which is emitted because of mvnrepository's HTML is so bad.
+Logger.getLogger("net.htmlparser.jericho").level = Level.OFF
 
 resolveAllVersions(retrieveArtifacts()).each { printArtifact it }
 
