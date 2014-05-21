@@ -1,5 +1,5 @@
 /*
- * Copyright 2010 the original author or authors.
+ * Copyright 2010-2014 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-@Grab("net.sourceforge.nekohtml:nekohtml:1.9.14")
-import org.cyberneko.html.parsers.SAXParser
+@Grab('net.htmlparser.jericho:jericho-html:3.3')
+import net.htmlparser.jericho.Source
 
 import groovyx.gpars.GParsPool
 import java.util.concurrent.LinkedBlockingQueue
@@ -88,15 +88,14 @@ def printArtifact = {
 
 def retrieveArtifacts = {
     def artifacts = []
-    def queryUrl = "http://mvnrepository.com/search.html?query=" + keywords.join('+')
-    new XmlParser(new SAXParser()).parse(queryUrl).'**'.P.findAll{ it.@class == 'result' }.flatten().each { p -> // for each found artifact
-        def a = p.A[0]
-        def (all, groupId, artifactId) = (a.@href =~ '^/artifact/([^/]+)/([^/]+)$')[0]
+    def queryUrl = new URL("http://mvnrepository.com/search.html?query=${keywords.join('+')}")
+    new Source(queryUrl).getAllElements("a")*.getAllElements("class", ~/result-title/).findAll { it }.flatten().each { element ->
+        def (all, groupId, artifactId) = (element.attributes.href.value =~ '^/artifact/([^/]+)/([^/]+)$')[0]
         artifacts << [
-            name: a.text(),
+            name: element.content,
             groupId: groupId,
             artifactId: artifactId,
-            url: "http://mvnrepository.com/artifact/${groupId}/${artifactId}",
+            url: new URL("http://mvnrepository.com/artifact/${groupId}/${artifactId}"),
             versions: 'WARN: exceeded upper limt to resolve versions',
             latestVersion: '*',
         ]
@@ -106,8 +105,7 @@ def retrieveArtifacts = {
 
 def resolveVersions = { artifact ->
     // retrieving all versions
-    artifact.versions = new XmlParser(new SAXParser()).parse(artifact.url).'**'.TABLE.findAll{ it.@class == 'grid' }.
-        '**'.TR.flatten().collect { tr -> tr.TD?.getAt(0)?.collect { it.text() }?.getAt(0) }.findAll{ it != null }
+    artifact.versions = source.getAllElements('class', ~/versionbutton release/).collect { it.content }
 
     // pick up latest version. I trust the order of versions in result page.
     artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
@@ -130,5 +128,5 @@ def resolveAllVersions = { artifacts ->
 // --------------------------------------
 // Main
 // --------------------------------------
-resolveAllVersions(retrieveArtifacts()).each{ printArtifact it }
+resolveAllVersions(retrieveArtifacts()).each { printArtifact it }
 
