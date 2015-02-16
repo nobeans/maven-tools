@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-@Grab('net.htmlparser.jericho:jericho-html:3.3')
-import net.htmlparser.jericho.Source
+@Grab('org.jsoup:jsoup:1.8.1')
+import org.jsoup.Jsoup
 
 import groovyx.gpars.GParsPool
 import java.util.concurrent.LinkedBlockingQueue
@@ -86,24 +86,23 @@ def printArtifact = { artifact ->
 
 def retrieveArtifacts = {
     def artifacts = []
-    def queryUrl = new URL("http://mvnrepository.com/search.html?query=${keywords.join('+')}")
-    new Source(queryUrl).getAllElements("a")*.getAllElements("class", ~/result-title/).findAll { it }.flatten().each { element ->
-        def (all, groupId, artifactId) = (element.attributes.href.value =~ '^/artifact/([^/]+)/([^/]+)$')[0]
-        artifacts << [
-            name: element.content,
+    def doc = Jsoup.connect("http://mvnrepository.com/search?q=${keywords.join('+')}").get()
+    return doc.select(".im-title > a:first-of-type").collect { element ->
+        def (all, groupId, artifactId) = (element.attr("href") =~ '^/artifact/([^/]+)/([^/]+)$')[0]
+        return [
+            name: element.text(),
             groupId: groupId,
             artifactId: artifactId,
-            url: new URL("http://mvnrepository.com/artifact/${groupId}/${artifactId}"),
+            url: "http://mvnrepository.com${element.attr("href")}",
             versions: ['WARN: exceeded upper limt to resolve versions'],
             latestVersion: '*',
         ]
     }
-    return artifacts.sort{ it.name }
 }
 
 def resolveVersions = { artifact ->
     // retrieving all versions
-    artifact.versions = new Source(artifact.url).getAllElements('class', ~/versionbutton release/).collect { it.content }
+    artifact.versions = Jsoup.connect(artifact.url).get().select(".vbtn.release")*.text()
 
     // pick up latest version. I trust the order of versions in result page.
     artifact.latestVersion = (artifact.versions) ? artifact.versions[0] : '?'
@@ -130,5 +129,5 @@ def resolveAllVersions = { artifacts ->
 // suppress a SEVERE log which is emitted because of mvnrepository's HTML is so bad.
 Logger.getLogger("net.htmlparser.jericho").level = Level.OFF
 
-resolveAllVersions(retrieveArtifacts()).each { printArtifact it }
+resolveAllVersions(retrieveArtifacts()).sort { it.name }.each { printArtifact it }
 
